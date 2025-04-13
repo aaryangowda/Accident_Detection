@@ -9,14 +9,15 @@ import tensorflow as tf
 
 # Force TensorFlow to use CPU and optimize memory usage
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'
 
 # Configure TensorFlow for minimal memory usage
 tf.config.set_visible_devices([], 'GPU')
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)
-tf.keras.mixed_precision.set_global_policy('float32')
+tf.keras.mixed_precision.set_global_policy('mixed_float16')
 
 from detection import AccidentDetectionModel
 from dotenv import load_dotenv
@@ -51,7 +52,7 @@ MODEL_WEIGHTS = "model_weights.h5"
 MODEL_JSON_ID = os.getenv("MODEL_JSON_ID", "1rTNqBBjEE9XnuWM8FFInOI_1o3Skw7xa")
 MODEL_WEIGHTS_ID = os.getenv("MODEL_WEIGHTS_ID", "18dLdwQiubd0yqnNpkM5Pi6G6EM0PxXKg")
 
-# Video file path - using a relative path
+# Video file path
 VIDEO_PATH = "static/video.mp4"
 UPLOAD_DIR = "static/uploads"
 
@@ -63,6 +64,8 @@ model = None
 font = cv2.FONT_HERSHEY_SIMPLEX
 video_capture = None
 current_video_path = None
+frame_skip = 2  # Process every nth frame
+frame_count = 0
 
 def initialize_model():
     """Initialize the model with memory optimization"""
@@ -112,7 +115,7 @@ def process_frame(frame):
     """Process a single frame with memory optimization"""
     try:
         # Reduce frame size immediately
-        frame = cv2.resize(frame, (160, 120))  # Even smaller size
+        frame = cv2.resize(frame, (160, 120))
         
         # Convert to RGB and prepare ROI
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -145,12 +148,19 @@ def process_frame(frame):
         return None
 
 def generate_frames():
+    global frame_count
     while True:
         try:
             ret, frame = video_capture.read()
             if not ret:
                 logger.info("End of video reached, restarting...")
                 video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                frame_count = 0
+                continue
+            
+            # Skip frames to reduce processing load
+            frame_count += 1
+            if frame_count % frame_skip != 0:
                 continue
             
             frame_bytes = process_frame(frame)
@@ -160,9 +170,10 @@ def generate_frames():
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             
-            # Clear TensorFlow session periodically
-            tf.keras.backend.clear_session()
-            gc.collect()
+            # Clear memory periodically
+            if frame_count % (frame_skip * 10) == 0:
+                tf.keras.backend.clear_session()
+                gc.collect()
             
         except Exception as e:
             logger.error(f"Error generating frame: {str(e)}")
