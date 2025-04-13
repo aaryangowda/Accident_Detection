@@ -8,11 +8,14 @@ import os
 import tensorflow as tf
 
 # Force TensorFlow to use CPU and optimize memory usage
-tf.config.set_visible_devices([], 'GPU')
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
-# Enable memory growth and optimization
-tf.config.experimental.enable_tensor_float_32_execution(False)
+# Configure TensorFlow for minimal memory usage
+tf.config.set_visible_devices([], 'GPU')
+tf.config.threading.set_inter_op_parallelism_threads(1)
+tf.config.threading.set_intra_op_parallelism_threads(1)
 tf.keras.mixed_precision.set_global_policy('float32')
 
 from detection import AccidentDetectionModel
@@ -22,6 +25,7 @@ import uvicorn
 import gdown
 import logging
 import shutil
+import gc
 from typing import Optional
 
 # Load environment variables
@@ -54,10 +58,26 @@ UPLOAD_DIR = "static/uploads"
 # Create upload directory if it doesn't exist
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Global variables
+model = None
+font = cv2.FONT_HERSHEY_SIMPLEX
+video_capture = None
+current_video_path = None
+
+def initialize_model():
+    """Initialize the model with memory optimization"""
+    global model
+    try:
+        if model is None:
+            model = AccidentDetectionModel(MODEL_JSON, MODEL_WEIGHTS)
+            logger.info("Model initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing model: {str(e)}")
+        raise
+
 def download_model_files():
     """Download model files from Google Drive if they don't exist"""
     try:
-        # Construct direct Google Drive URLs
         json_url = f"https://drive.google.com/uc?id={MODEL_JSON_ID}"
         weights_url = f"https://drive.google.com/uc?id={MODEL_WEIGHTS_ID}"
         
@@ -77,6 +97,10 @@ def download_model_files():
                 raise Exception("Failed to download model_weights.h5")
                 
         logger.info("Model files downloaded successfully")
+        
+        # Initialize model after downloading
+        initialize_model()
+        
     except Exception as e:
         logger.error(f"Error downloading model files: {str(e)}")
         raise
@@ -84,19 +108,65 @@ def download_model_files():
 # Download model files on startup
 download_model_files()
 
-# Initialize model
-try:
-    model = AccidentDetectionModel(MODEL_JSON, MODEL_WEIGHTS)
-    logger.info("Model initialized successfully")
-except Exception as e:
-    logger.error(f"Error initializing model: {str(e)}")
-    raise
+def process_frame(frame):
+    """Process a single frame with memory optimization"""
+    try:
+        # Reduce frame size immediately
+        frame = cv2.resize(frame, (160, 120))  # Even smaller size
+        
+        # Convert to RGB and prepare ROI
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        roi = cv2.resize(rgb_frame, (250, 250))
+        
+        # Normalize and convert to float32
+        roi = (roi.astype(np.float32) / 255.0)
+        
+        # Make prediction
+        pred, prob = model.predict_accident(roi[np.newaxis, :, :])
+        
+        # Draw prediction if accident detected
+        if pred == "Accident":
+            prob = round(prob[0][0]*100, 2)
+            cv2.rectangle(frame, (0, 0), (140, 20), (0, 0, 0), -1)
+            cv2.putText(frame, f"{prob}%", (10, 15), font, 0.5, (255, 255, 0), 1)
+        
+        # Convert to JPEG with very low quality
+        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        
+        # Clean up
+        del rgb_frame
+        del roi
+        gc.collect()
+        
+        return buffer.tobytes()
+        
+    except Exception as e:
+        logger.error(f"Error processing frame: {str(e)}")
+        return None
 
-font = cv2.FONT_HERSHEY_SIMPLEX
-
-# Global variables for video capture
-video_capture = None
-current_video_path = None
+def generate_frames():
+    while True:
+        try:
+            ret, frame = video_capture.read()
+            if not ret:
+                logger.info("End of video reached, restarting...")
+                video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
+            
+            frame_bytes = process_frame(frame)
+            if frame_bytes is None:
+                continue
+                
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            # Clear TensorFlow session periodically
+            tf.keras.backend.clear_session()
+            gc.collect()
+            
+        except Exception as e:
+            logger.error(f"Error generating frame: {str(e)}")
+            break
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -165,50 +235,6 @@ async def video_feed():
                 logger.error(error_msg)
                 return Response(content=error_msg, status_code=500)
             logger.info("Video capture initialized successfully")
-        
-        def generate_frames():
-            while True:
-                try:
-                    ret, frame = video_capture.read()
-                    if not ret:
-                        logger.info("End of video reached, restarting...")
-                        video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        continue
-                        
-                    # Process smaller frames from the start to reduce memory usage
-                    frame = cv2.resize(frame, (320, 240))  # Reduced size
-                    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    roi = cv2.resize(gray_frame, (250, 250))
-                    
-                    # Use numpy's float32 for better memory efficiency
-                    roi = roi.astype(np.float32) / 255.0
-                    
-                    # Make prediction
-                    pred, prob = model.predict_accident(roi[np.newaxis, :, :])
-                    
-                    if pred == "Accident":
-                        prob = (round(prob[0][0]*100, 2))
-                        cv2.rectangle(frame, (0, 0), (280, 40), (0, 0, 0), -1)
-                        cv2.putText(frame, f"{pred} {prob}%", (20, 30), font, 1, (255, 255, 0), 2)
-                    
-                    # Convert frame to JPEG with lower quality
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                    frame_bytes = buffer.tobytes()
-                    
-                    # Clear variables to free memory
-                    del frame
-                    del gray_frame
-                    del roi
-                    del buffer
-                    
-                    # Clear TensorFlow's memory
-                    tf.keras.backend.clear_session()
-                    
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                except Exception as e:
-                    logger.error(f"Error generating frame: {str(e)}")
-                    break
         
         return StreamingResponse(generate_frames(), media_type='multipart/x-mixed-replace; boundary=frame')
     
