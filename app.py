@@ -53,17 +53,26 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 def download_model_files():
     """Download model files from Google Drive if they don't exist"""
     try:
+        # Construct direct Google Drive URLs
+        json_url = f"https://drive.google.com/uc?id={MODEL_JSON_ID}"
+        weights_url = f"https://drive.google.com/uc?id={MODEL_WEIGHTS_ID}"
+        
+        if not MODEL_JSON_ID or not MODEL_WEIGHTS_ID:
+            raise ValueError("MODEL_JSON_ID and MODEL_WEIGHTS_ID must be set in .env file")
+            
         if not os.path.exists(MODEL_JSON):
             logger.info("Downloading model.json...")
-            gdown.download(id=MODEL_JSON_ID, output=MODEL_JSON, quiet=False)
+            gdown.download(url=json_url, output=MODEL_JSON, quiet=False)
             if not os.path.exists(MODEL_JSON):
                 raise Exception("Failed to download model.json")
         
         if not os.path.exists(MODEL_WEIGHTS):
             logger.info("Downloading model_weights.h5...")
-            gdown.download(id=MODEL_WEIGHTS_ID, output=MODEL_WEIGHTS, quiet=False)
+            gdown.download(url=weights_url, output=MODEL_WEIGHTS, quiet=False)
             if not os.path.exists(MODEL_WEIGHTS):
                 raise Exception("Failed to download model_weights.h5")
+                
+        logger.info("Model files downloaded successfully")
     except Exception as e:
         logger.error(f"Error downloading model files: {str(e)}")
         raise
