@@ -1,50 +1,111 @@
 # Accident Detection System
 
-**Last Updated: *7 June 2022***
+A real-time accident detection system using deep learning and computer vision. The system can process video feeds from webcams or uploaded video files to detect accidents in real-time.
 
-1. Demonstration
-2. What is Accident Detection System?
-3. Prerequisites
-4. Getting Started- How to use it?
-5. Description
-6. Future Work
+## Features
 
-## 1. Demonstration
+- Real-time accident detection
+- Support for webcam input
+- Video file upload functionality
+- Web-based interface
+- Real-time probability display
+- Debug information
+- Supports MP4, AVI, and MOV video formats
 
-![Demo](https://user-images.githubusercontent.com/54409969/173066273-732f7da9-8645-4809-aa7a-bb2f78548b3e.gif)
+## Tech Stack
 
-## 2. What is Accident Detection System?
+- Python 3.12
+- FastAPI
+- OpenCV
+- TensorFlow/Keras
+- HTML/CSS/JavaScript
+- Bootstrap 5
 
-An accident Detection System is designed to detect accidents via video or CCTV footage. Road accidents are a significant problem for the whole world. Many people lose their lives in road accidents. We can minimize this issue by using CCTV accident detection. This repository majorly explores how CCTV can detect these accidents with the help of Deep Learning.
+## Prerequisites
 
-## 3. Prerequisites
+- Python 3.12 or higher
+- pip (Python package manager)
+- Virtual environment (recommended)
 
-- To use this project Python Version > 3.6 is recommended.
-- To contribute to this project, knowledge of basic python scripting, Machine Learning, and Deep Learning will help.
+## Installation
 
-## 4. Getting Started - How to use it?
+1. Clone the repository:
+```bash
+git clone <your-repo-url>
+cd accident-detection-system
+```
 
-### Clone this repository
+2. Create and activate a virtual environment:
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+```
 
-`https://github.com/krishrustagi/Accident-Detection-System.git`
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-To install all the packages required to run this python program
-`pip install -r requirements.txt`
+## Model Files
 
-**Note:** This project requires a camera. So make sure you have a connected camera to your device. You can also use a downloaded video if not using a camera.
+The system requires two model files:
+- `model.json`: Model architecture
+- `model_weights.h5`: Model weights
 
-### Run
-Before running the program, you need to run the `accident-classification.ipynb` file which will create the `model_weights.h5` file. Then, to run this python program, you need to execute the `main.py` python file.
+These files will be automatically downloaded from Google Drive when you run the application.
 
-## 5. Description
+## Running Locally
 
-This program includes 4 things.
+1. Start the application:
+```bash
+python app.py
+```
 
-1. `data`: Kaggle dataset on [Accident Detection from CCTV footage](https://www.kaggle.com/code/mrcruise/accident-classification/data).
-2. `accident-classification.ipynb`: This is a jupyter notebook that generates a model to classify the above data. This file generates two important files `model.json` and `model_weights.h5`.
-3. `detection.py`: This file loads the Accident Detection system with the help of `model.json` and `model_weights.h5` files.
-4. `camera.py`: It packs the camera and executes the `detection.py` file on the video dividing it frame by frame and displaying the percentage of the prediction in the accident (if present) in the frame.
+2. Open your browser and navigate to:
+```
+http://localhost:8080
+```
 
-## 6. Future Work
+## Deployment on Render
 
-We can use an alarm system that can call the nearest police station in case of an accident and also alert them of the severity of the accident.
+1. Create a new Web Service on Render
+2. Connect your GitHub repository
+3. Use the following settings:
+   - Environment: Python 3
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `uvicorn app:app --host 0.0.0.0 --port $PORT`
+   - Add the following environment variables:
+     - `PYTHON_VERSION`: 3.12
+
+## Environment Variables
+
+Create a `.env` file in the root directory with the following variables:
+```env
+MODEL_JSON_ID=your_model_json_id
+MODEL_WEIGHTS_ID=your_model_weights_id
+```
+
+## Project Structure
+
+```
+.
+├── app.py              # Main FastAPI application
+├── detection.py        # Accident detection model implementation
+├── requirements.txt    # Python dependencies
+├── static/            # Static files
+│   └── uploads/       # Directory for uploaded videos
+├── templates/         # HTML templates
+│   └── index.html    # Main web interface
+└── README.md         # This file
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a new branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

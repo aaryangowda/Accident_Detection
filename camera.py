@@ -7,9 +7,18 @@ model = AccidentDetectionModel("model.json", 'model_weights.h5')
 font = cv2.FONT_HERSHEY_SIMPLEX
 
 def startapplication():
-    video = cv2.VideoCapture('cars.mp4') # for camera use video = cv2.VideoCapture(0)
+    video = cv2.VideoCapture('/Users/aaryangowda/Downloads/videoplayback (online-video-cutter.com).mp4')  # Path to video file
+    
+    if not video.isOpened():
+        print("Error: Could not open video device")
+        return
+        
     while True:
         ret, frame = video.read()
+        if not ret:
+            print("Error: Could not read frame")
+            break
+            
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         roi = cv2.resize(gray_frame, (250, 250))
 
