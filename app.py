@@ -7,9 +7,20 @@ import numpy as np
 import os
 import tensorflow as tf
 
-# Force TensorFlow to use CPU
+# Force TensorFlow to use CPU and optimize memory usage
 tf.config.set_visible_devices([], 'GPU')
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
+# Limit TensorFlow memory growth
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+
+# Limit memory allocation
+tf.config.experimental.set_virtual_device_configuration(
+    tf.config.list_physical_devices('CPU')[0],
+    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)]
+)
 
 from detection import AccidentDetectionModel
 from dotenv import load_dotenv
@@ -40,8 +51,8 @@ MODEL_JSON = "model.json"
 MODEL_WEIGHTS = "model_weights.h5"
 
 # Google Drive file IDs
-MODEL_JSON_ID = os.getenv("MODEL_JSON_ID")
-MODEL_WEIGHTS_ID = os.getenv("MODEL_WEIGHTS_ID")
+MODEL_JSON_ID = os.getenv("MODEL_JSON_ID", "1rTNqBBjEE9XnuWM8FFInOI_1o3Skw7xa")
+MODEL_WEIGHTS_ID = os.getenv("MODEL_WEIGHTS_ID", "18dLdwQiubd0yqnNpkM5Pi6G6EM0PxXKg")
 
 # Video file path - using a relative path
 VIDEO_PATH = "static/video.mp4"
@@ -171,18 +182,30 @@ async def video_feed():
                         video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         continue
                         
+                    # Reduce memory usage by processing smaller frames
+                    frame = cv2.resize(frame, (640, 480))
                     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     roi = cv2.resize(gray_frame, (250, 250))
                     
+                    # Clear memory after prediction
                     pred, prob = model.predict_accident(roi[np.newaxis, :, :])
+                    tf.keras.backend.clear_session()
+                    
                     if pred == "Accident":
                         prob = (round(prob[0][0]*100, 2))
                         cv2.rectangle(frame, (0, 0), (280, 40), (0, 0, 0), -1)
                         cv2.putText(frame, f"{pred} {prob}%", (20, 30), font, 1, (255, 255, 0), 2)
                     
-                    # Convert frame to JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame)
+                    # Convert frame to JPEG with lower quality to reduce memory
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     frame_bytes = buffer.tobytes()
+                    
+                    # Clear variables to free memory
+                    del frame
+                    del gray_frame
+                    del roi
+                    del buffer
+                    
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                 except Exception as e:
