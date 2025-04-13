@@ -12,6 +12,9 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'
+os.environ['TF_NUM_INTEROP_THREADS'] = '1'
+os.environ['TF_NUM_INTRAOP_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '1'
 
 # Configure TensorFlow for minimal memory usage
 tf.config.set_visible_devices([], 'GPU')
@@ -64,8 +67,10 @@ model = None
 font = cv2.FONT_HERSHEY_SIMPLEX
 video_capture = None
 current_video_path = None
-frame_skip = 2  # Process every nth frame
+frame_skip = 4  # Process every 4th frame
 frame_count = 0
+MAX_FRAME_SIZE = (120, 90)  # Reduced frame size
+JPEG_QUALITY = 30  # Reduced JPEG quality
 
 def initialize_model():
     """Initialize the model with memory optimization"""
@@ -115,33 +120,40 @@ def process_frame(frame):
     """Process a single frame with memory optimization"""
     try:
         # Reduce frame size immediately
-        frame = cv2.resize(frame, (160, 120))
+        frame = cv2.resize(frame, MAX_FRAME_SIZE)
         
-        # Convert to RGB and prepare ROI
+        # Convert to RGB and prepare ROI (maintain aspect ratio)
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         roi = cv2.resize(rgb_frame, (250, 250))
         
-        # Normalize and convert to float32
+        # Free memory
+        del rgb_frame
+        
+        # Normalize
         roi = (roi.astype(np.float32) / 255.0)
         
         # Make prediction
         pred, prob = model.predict_accident(roi[np.newaxis, :, :])
         
+        # Free memory
+        del roi
+        
         # Draw prediction if accident detected
         if pred == "Accident":
             prob = round(prob[0][0]*100, 2)
-            cv2.rectangle(frame, (0, 0), (140, 20), (0, 0, 0), -1)
-            cv2.putText(frame, f"{prob}%", (10, 15), font, 0.5, (255, 255, 0), 1)
+            cv2.rectangle(frame, (0, 0), (60, 12), (0, 0, 0), -1)
+            cv2.putText(frame, f"{prob}%", (2, 10), font, 0.3, (255, 255, 0), 1)
         
         # Convert to JPEG with very low quality
-        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+        frame_bytes = buffer.tobytes()
         
         # Clean up
-        del rgb_frame
-        del roi
+        del frame
+        del buffer
         gc.collect()
         
-        return buffer.tobytes()
+        return frame_bytes
         
     except Exception as e:
         logger.error(f"Error processing frame: {str(e)}")
@@ -151,6 +163,11 @@ def generate_frames():
     global frame_count
     while True:
         try:
+            # Clear memory periodically
+            if frame_count % (frame_skip * 5) == 0:
+                tf.keras.backend.clear_session()
+                gc.collect()
+            
             ret, frame = video_capture.read()
             if not ret:
                 logger.info("End of video reached, restarting...")
@@ -161,19 +178,19 @@ def generate_frames():
             # Skip frames to reduce processing load
             frame_count += 1
             if frame_count % frame_skip != 0:
+                del frame
                 continue
             
             frame_bytes = process_frame(frame)
+            del frame
+            
             if frame_bytes is None:
                 continue
                 
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             
-            # Clear memory periodically
-            if frame_count % (frame_skip * 10) == 0:
-                tf.keras.backend.clear_session()
-                gc.collect()
+            del frame_bytes
             
         except Exception as e:
             logger.error(f"Error generating frame: {str(e)}")
