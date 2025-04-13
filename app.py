@@ -4,14 +4,24 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import cv2
 import numpy as np
-from detection import AccidentDetectionModel
 import os
+import tensorflow as tf
+
+# Force TensorFlow to use CPU
+tf.config.set_visible_devices([], 'GPU')
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
+from detection import AccidentDetectionModel
+from dotenv import load_dotenv
 import io
 import uvicorn
 import gdown
 import logging
 import shutil
 from typing import Optional
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,8 +40,8 @@ MODEL_JSON = "model.json"
 MODEL_WEIGHTS = "model_weights.h5"
 
 # Google Drive file IDs
-MODEL_JSON_ID = "1rTNqBBjEE9XnuWM8FFInOI_1o3Skw7xa"
-MODEL_WEIGHTS_ID = "18dLdwQiubd0yqnNpkM5Pi6G6EM0PxXKg"
+MODEL_JSON_ID = os.getenv("MODEL_JSON_ID")
+MODEL_WEIGHTS_ID = os.getenv("MODEL_WEIGHTS_ID")
 
 # Video file path - using a relative path
 VIDEO_PATH = "static/video.mp4"
