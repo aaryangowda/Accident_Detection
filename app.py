@@ -11,16 +11,9 @@ import tensorflow as tf
 tf.config.set_visible_devices([], 'GPU')
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-# Limit TensorFlow memory growth
-gpus = tf.config.experimental.list_physical_devices('GPU')
-for gpu in gpus:
-    tf.config.experimental.set_memory_growth(gpu, True)
-
-# Limit memory allocation
-tf.config.experimental.set_virtual_device_configuration(
-    tf.config.list_physical_devices('CPU')[0],
-    [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1024)]
-)
+# Enable memory growth and optimization
+tf.config.experimental.enable_tensor_float_32_execution(False)
+tf.keras.mixed_precision.set_global_policy('float32')
 
 from detection import AccidentDetectionModel
 from dotenv import load_dotenv
@@ -182,22 +175,24 @@ async def video_feed():
                         video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         continue
                         
-                    # Reduce memory usage by processing smaller frames
-                    frame = cv2.resize(frame, (640, 480))
+                    # Process smaller frames from the start to reduce memory usage
+                    frame = cv2.resize(frame, (320, 240))  # Reduced size
                     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     roi = cv2.resize(gray_frame, (250, 250))
                     
-                    # Clear memory after prediction
+                    # Use numpy's float32 for better memory efficiency
+                    roi = roi.astype(np.float32) / 255.0
+                    
+                    # Make prediction
                     pred, prob = model.predict_accident(roi[np.newaxis, :, :])
-                    tf.keras.backend.clear_session()
                     
                     if pred == "Accident":
                         prob = (round(prob[0][0]*100, 2))
                         cv2.rectangle(frame, (0, 0), (280, 40), (0, 0, 0), -1)
                         cv2.putText(frame, f"{pred} {prob}%", (20, 30), font, 1, (255, 255, 0), 2)
                     
-                    # Convert frame to JPEG with lower quality to reduce memory
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    # Convert frame to JPEG with lower quality
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     frame_bytes = buffer.tobytes()
                     
                     # Clear variables to free memory
@@ -205,6 +200,9 @@ async def video_feed():
                     del gray_frame
                     del roi
                     del buffer
+                    
+                    # Clear TensorFlow's memory
+                    tf.keras.backend.clear_session()
                     
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
