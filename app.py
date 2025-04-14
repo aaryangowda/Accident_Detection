@@ -6,6 +6,8 @@ import cv2
 import numpy as np
 import os
 import tensorflow as tf
+import time
+import gc
 
 # Force TensorFlow to use CPU and optimize memory usage
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -15,6 +17,8 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = '1'
 os.environ['TF_NUM_INTEROP_THREADS'] = '1'
 os.environ['TF_NUM_INTRAOP_THREADS'] = '1'
 os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['TF_KERAS_MODEL_CHUNK_SIZE'] = '50000000'  # 50MB chunks
+os.environ['TF_KERAS_CLEAR_SESSION_ON_CHUNK'] = '1'
 
 # Configure TensorFlow for minimal memory usage
 tf.config.set_visible_devices([], 'GPU')
@@ -29,7 +33,6 @@ import uvicorn
 import gdown
 import logging
 import shutil
-import gc
 from typing import Optional
 
 # Load environment variables
@@ -67,18 +70,26 @@ model = None
 font = cv2.FONT_HERSHEY_SIMPLEX
 video_capture = None
 current_video_path = None
-frame_skip = 4  # Process every 4th frame
+frame_skip = 6  # Process every 6th frame
 frame_count = 0
-MAX_FRAME_SIZE = (120, 90)  # Reduced frame size
-JPEG_QUALITY = 30  # Reduced JPEG quality
+MAX_FRAME_SIZE = (80, 60)  # Extremely reduced frame size
+JPEG_QUALITY = 20  # Very low JPEG quality
+MAX_FPS = 5  # Limit FPS to reduce processing load
 
 def initialize_model():
     """Initialize the model with memory optimization"""
     global model
     try:
         if model is None:
+            # Clear memory before model initialization
+            gc.collect()
+            tf.keras.backend.clear_session()
+            
             model = AccidentDetectionModel(MODEL_JSON, MODEL_WEIGHTS)
             logger.info("Model initialized successfully")
+            
+            # Force garbage collection
+            gc.collect()
     except Exception as e:
         logger.error(f"Error initializing model: {str(e)}")
         raise
@@ -117,32 +128,35 @@ def download_model_files():
 download_model_files()
 
 def process_frame(frame):
-    """Process a single frame with memory optimization"""
+    """Process a single frame with extreme memory optimization"""
     try:
         # Reduce frame size immediately
         frame = cv2.resize(frame, MAX_FRAME_SIZE)
         
-        # Convert to RGB and prepare ROI (maintain aspect ratio)
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Convert to grayscale to reduce memory
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Convert back to RGB for model input
+        rgb_frame = cv2.cvtColor(gray_frame, cv2.COLOR_GRAY2RGB)
         roi = cv2.resize(rgb_frame, (250, 250))
         
         # Free memory
+        del gray_frame
         del rgb_frame
-        
-        # Normalize
-        roi = (roi.astype(np.float32) / 255.0)
+        gc.collect()
         
         # Make prediction
         pred, prob = model.predict_accident(roi[np.newaxis, :, :])
         
         # Free memory
         del roi
+        gc.collect()
         
         # Draw prediction if accident detected
         if pred == "Accident":
             prob = round(prob[0][0]*100, 2)
-            cv2.rectangle(frame, (0, 0), (60, 12), (0, 0, 0), -1)
-            cv2.putText(frame, f"{prob}%", (2, 10), font, 0.3, (255, 255, 0), 1)
+            cv2.rectangle(frame, (0, 0), (30, 8), (0, 0, 0), -1)
+            cv2.putText(frame, f"{prob}%", (2, 6), font, 0.25, (255, 255, 0), 1)
         
         # Convert to JPEG with very low quality
         ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
@@ -161,10 +175,18 @@ def process_frame(frame):
 
 def generate_frames():
     global frame_count
+    last_frame_time = 0
+    
     while True:
         try:
+            # Implement FPS limiting
+            current_time = time.time()
+            if current_time - last_frame_time < 1.0/MAX_FPS:
+                continue
+            last_frame_time = current_time
+            
             # Clear memory periodically
-            if frame_count % (frame_skip * 5) == 0:
+            if frame_count % (frame_skip * 3) == 0:
                 tf.keras.backend.clear_session()
                 gc.collect()
             
@@ -191,6 +213,7 @@ def generate_frames():
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             
             del frame_bytes
+            gc.collect()
             
         except Exception as e:
             logger.error(f"Error generating frame: {str(e)}")
